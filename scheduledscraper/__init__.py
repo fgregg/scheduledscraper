@@ -6,6 +6,7 @@ from typing import (
     Text,
     Tuple,
     Union,
+    List,
     cast,
 )
 import abc
@@ -13,6 +14,7 @@ import sqlite3
 import email.utils
 import hashlib
 import time
+import math
 
 import requests
 import scrapelib
@@ -100,8 +102,8 @@ class Scraper(scrapelib.Scraper):
 
 
 class Scheduler(abc.ABC):
-    storage: 'Storage' 
-    
+    storage: "Storage"
+
     @abc.abstractmethod
     def query(self, key) -> bool:
         ...
@@ -136,15 +138,47 @@ class DummyScheduler(Scheduler):
         ...
 
 
+class PoissonScheduler(Scheduler):
+    def __init__(self, storage, threshold: float = 0.3, prior_weight: float = 3):
+
+        self.storage = storage
+        self.threshold = threshold
+
+        rate = len(self.storage.intervals()) / sum(self.storage.intervals())  # type: ignore
+        self.alpha = prior_weight
+        self.beta = prior_weight * (1 / rate)
+
+    def query(self, key) -> bool:
+
+        result = self.storage.get(key)
+        if result is None:
+            return True
+
+        prob_change = self._prob(*result)
+
+        return prob_change > self.threshold
+
+    def _prob(self, time_since_last_check, time_unchanged):
+
+        prob_no_change = math.exp(
+            -((self.alpha + 1) / (self.beta + time_unchanged)) * time_since_last_check
+        )
+        return 1 - prob_no_change
+
+
 class Storage(abc.ABC):
     @abc.abstractmethod
-    def get(self, key: str) -> Optional[float]:
+    def get(self, key: str) -> Optional[Tuple[float, float]]:
         ...
 
     @abc.abstractmethod
     def set(
         self, key: str, content_hash: str, last_checked: float, last_modified: float
     ) -> None:
+        ...
+
+    @abc.abstractmethod
+    def intervals(self) -> List[float]:
         ...
 
 
@@ -164,13 +198,13 @@ class SqliteStorage(Storage):
                 last_changed datetime)"""
         )
 
-    def get(self, key: str) -> Optional[float]:
+    def get(self, key: str) -> Optional[Tuple[float, float]]:
 
         query = self._conn.execute(
-            "SELECT last_checked - last_changed FROM history where key=?", (key,)
+            "SELECT strftime('%s', 'now') - last_checked, last_checked - last_changed FROM history where key=?",
+            (key,),
         )
-        (seconds_since_last_change,) = query.fetchone()
-        return seconds_since_last_change
+        return query.fetchone()
 
     def set(
         self, key: str, content_hash: str, last_checked: float, last_changed: float
@@ -197,3 +231,11 @@ class SqliteStorage(Storage):
                     """INSERT INTO history VALUES (?, ?, ?, ?)""",
                     (key, content_hash, last_checked, last_changed),
                 )
+
+    def intervals(self):
+
+        query = "SELECT last_checked - last_changed FROM history"
+
+        result = self._conn.execute(query)
+
+        return [span for span, in result]
