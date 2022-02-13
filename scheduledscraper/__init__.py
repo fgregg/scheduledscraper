@@ -157,7 +157,7 @@ class SqliteStorage(Storage):
 
         header_date = response.headers.get("date")
         if header_date:
-            last_checked = time.mktime(email.utils.parsedate(header_date))
+            last_checked = time.mktime(email.utils.parsedate(header_date))  # type: ignore
         else:
             last_checked = time.time()
 
@@ -175,7 +175,7 @@ class SqliteStorage(Storage):
 
             header_last_modified = response.headers.get("last-modified")
             if header_last_modified:
-                last_changed = time.mktime(email.utils.parsedate(header_last_modified))
+                last_changed = time.mktime(email.utils.parsedate(header_last_modified))  # type: ignore
             else:
                 last_changed = last_checked
 
