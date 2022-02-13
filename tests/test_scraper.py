@@ -24,5 +24,5 @@ def test_scraper_never(mocker):
     response = scraper.get("https://httpbin.org/status/200")
 
     assert response.status_code == 418
-    assert response.content == "The scheduler said we should skip"
+    assert response.text == "The scheduler said we should skip"
     never_scheduler.update.assert_not_called()

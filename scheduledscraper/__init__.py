@@ -36,7 +36,7 @@ class Scraper(scrapelib.Scraper):
 
         super().__init__(*args, **kwargs)
 
-    def request(
+    def request(  # type: ignore
         self,
         method: str,
         url: Union[str, bytes, Text],
@@ -89,12 +89,13 @@ class Scraper(scrapelib.Scraper):
 
         else:
 
-            response = requests.Response()
+            response = scrapelib.CacheResponse()
             response.status_code = 418
             response.url = cast(str, url)
             response.headers = requests.structures.CaseInsensitiveDict()
-            response._content = "The scheduler said we should skip"
-            response.raw = response._content.encode()
+            response._content = "The scheduler said we should skip".encode()
+            response.raw = object()
+            response.fromcache = False
 
         return response
 
@@ -115,4 +116,14 @@ class DummyScheduler(Scheduler):
         return True
 
     def update(self, key, response: requests.Response) -> None:
+        ...
+
+
+class Storage(abc.ABC):
+    @abc.abstractmethod
+    def get(self, key) -> float:
+        ...
+
+    @abc.abstractmethod
+    def set(self, key, response) -> None:
         ...
