@@ -232,7 +232,7 @@ class SqliteStorage(Storage):
                     (key, content_hash, last_checked, last_changed),
                 )
 
-    def intervals(self):
+    def intervals(self) -> List[float]:
 
         query = "SELECT last_checked - last_changed FROM history"
 
