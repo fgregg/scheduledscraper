@@ -9,6 +9,11 @@ from typing import (
     cast,
 )
 import abc
+import sqlite3
+import datetime
+import email.utils
+import hashlib
+import time
 
 import requests
 import scrapelib
@@ -116,9 +121,74 @@ class DummyScheduler(Scheduler):
 
 class Storage(abc.ABC):
     @abc.abstractmethod
-    def get(self, key) -> float:
+    def get(self, key: str) -> Optional[float]:
         ...
 
     @abc.abstractmethod
-    def set(self, key, response) -> None:
+    def set(self, key: str, response: requests.Response) -> None:
         ...
+
+
+class SqliteStorage(Storage):
+    def __init__(self, path):
+
+        self._conn = sqlite3.connect(path)
+        self._build_table()
+
+    def _build_table(self) -> None:
+
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS history
+               (key text PRIMARY KEY,
+                hash text,
+                last_checked datetime,
+                last_changed datetime)"""
+        )
+
+    def get(self, key: str) -> Optional[float]:
+
+        query = self._conn.execute(
+            "SELECT last_checked - last_changed FROM history where key=?", (key,)
+        )
+        (seconds_since_last_change,) = query.fetchone()
+        return seconds_since_last_change
+
+    def set(self, key: str, response: requests.Response) -> None:
+
+        header_date = response.headers.get("date")
+        if header_date:
+            last_checked = time.mktime(email.utils.parsedate(header_date))
+        else:
+            last_checked = time.time()
+
+        h = hashlib.sha256()
+        h.update(response.content)
+        content_hash = h.hexdigest()
+
+        query = self._conn.execute("SELECT hash FROM history where key=?", (key,))
+        row = query.fetchone()
+        stored_hash = row[0] if row else None
+
+        if stored_hash == content_hash:
+            self._conn.execute("UPDATE history SET last_checked = ?", (last_checked,))
+        else:
+
+            header_last_modified = response.headers.get("last-modified")
+            if header_last_modified:
+                last_changed = time.mktime(email.utils.parsedate(header_last_modified))
+            else:
+                last_changed = last_checked
+
+            if stored_hash:
+                self._conn.execute(
+                    """UPDATE history SET hash = ?,
+                                          last_checked = ?,
+                                          last_changed = ?
+                       WHERE key = ?""",
+                    (content_hash, last_checked, last_changed, key),
+                )
+            else:
+                self._conn.execute(
+                    """INSERT INTO history VALUES (?, ?, ?, ?)""",
+                    (key, content_hash, last_checked, last_changed),
+                )
