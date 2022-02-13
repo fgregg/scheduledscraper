@@ -100,6 +100,8 @@ class Scraper(scrapelib.Scraper):
 
 
 class Scheduler(abc.ABC):
+    storage: Storage 
+    
     @abc.abstractmethod
     def query(self, key) -> bool:
         ...
