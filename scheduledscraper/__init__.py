@@ -10,7 +10,6 @@ from typing import (
 )
 import abc
 import sqlite3
-import datetime
 import email.utils
 import hashlib
 import time
@@ -105,9 +104,25 @@ class Scheduler(abc.ABC):
     def query(self, key) -> bool:
         ...
 
-    @abc.abstractmethod
     def update(self, key, response: requests.Response) -> None:
-        ...
+
+        header_date = response.headers.get("date")
+        if header_date:
+            last_checked = time.mktime(email.utils.parsedate(header_date))  # type: ignore
+        else:
+            last_checked = time.time()
+
+        header_last_modified = response.headers.get("last-modified")
+        if header_last_modified:
+            last_changed = time.mktime(email.utils.parsedate(header_last_modified))  # type: ignore
+        else:
+            last_changed = last_checked
+
+        h = hashlib.sha256()
+        h.update(response.content)
+        content_hash = h.hexdigest()
+
+        self.storage.set(key, content_hash, last_checked, last_changed)
 
 
 class DummyScheduler(Scheduler):
@@ -125,7 +140,9 @@ class Storage(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def set(self, key: str, response: requests.Response) -> None:
+    def set(
+        self, key: str, content_hash: str, last_checked: float, last_modified: float
+    ) -> None:
         ...
 
 
@@ -153,17 +170,9 @@ class SqliteStorage(Storage):
         (seconds_since_last_change,) = query.fetchone()
         return seconds_since_last_change
 
-    def set(self, key: str, response: requests.Response) -> None:
-
-        header_date = response.headers.get("date")
-        if header_date:
-            last_checked = time.mktime(email.utils.parsedate(header_date))  # type: ignore
-        else:
-            last_checked = time.time()
-
-        h = hashlib.sha256()
-        h.update(response.content)
-        content_hash = h.hexdigest()
+    def set(
+        self, key: str, content_hash: str, last_checked: float, last_changed: float
+    ) -> None:
 
         query = self._conn.execute("SELECT hash FROM history where key=?", (key,))
         row = query.fetchone()
@@ -172,12 +181,6 @@ class SqliteStorage(Storage):
         if stored_hash == content_hash:
             self._conn.execute("UPDATE history SET last_checked = ?", (last_checked,))
         else:
-
-            header_last_modified = response.headers.get("last-modified")
-            if header_last_modified:
-                last_changed = time.mktime(email.utils.parsedate(header_last_modified))  # type: ignore
-            else:
-                last_changed = last_checked
 
             if stored_hash:
                 self._conn.execute(
