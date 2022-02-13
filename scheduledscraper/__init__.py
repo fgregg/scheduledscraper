@@ -27,13 +27,12 @@ from scrapelib._types import (
 
 
 class Scraper(scrapelib.Scraper):
-
-    def __init__(self, *args, scheduler: 'Scheduler' = None, **kwargs):
+    def __init__(self, *args, scheduler: "Scheduler" = None, **kwargs):
 
         if scheduler is not None:
             self.scheduler = scheduler
         else:
-            raise ValueError('You must supply a scheduler')
+            raise ValueError("You must supply a scheduler")
 
         super().__init__(*args, **kwargs)
 
@@ -58,7 +57,6 @@ class Scraper(scrapelib.Scraper):
         retry_on_404: bool = False,
     ) -> scrapelib.CacheResponse:
 
-        
         method = method.lower()
         request_key = self.key_for_request(method, url)
 
@@ -93,16 +91,15 @@ class Scraper(scrapelib.Scraper):
 
             response = requests.Response()
             response.status_code = 418
-            response.url = cast(str, request.url)
+            response.url = cast(str, url)
             response.headers = requests.structures.CaseInsensitiveDict()
-            response._content = 'The scheduler said we should skip'
+            response._content = "The scheduler said we should skip"
             response.raw = response._content.encode()
 
         return response
-                
+
 
 class Scheduler(abc.ABC):
-
     @abc.abstractmethod
     def query(self, key) -> bool:
         ...
@@ -110,14 +107,12 @@ class Scheduler(abc.ABC):
     @abc.abstractmethod
     def update(self, key, response: requests.Response) -> None:
         ...
-        
+
 
 class DummyScheduler(Scheduler):
-
     def query(self, key) -> bool:
 
         return True
 
     def update(self, key, response: requests.Response) -> None:
         ...
-    
