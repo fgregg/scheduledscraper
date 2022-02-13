@@ -1,9 +1,6 @@
 from typing import (
     Any,
-    Callable,
-    Container,
     IO,
-    Mapping,
     MutableMapping,
     Optional,
     Text,
@@ -18,11 +15,9 @@ import scrapelib
 
 from scrapelib._types import (
     _Data,
-    PreparedRequest,
     RequestsCookieJar,
     _HooksInput,
     _AuthType,
-    Response,
 )
 
 
