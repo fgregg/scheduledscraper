@@ -1,14 +1,22 @@
-from typing import Any, IO, MutableMapping, Optional, Text, Tuple, Union, List, cast
+from typing import (
+    Any,
+    IO,
+    MutableMapping,
+    Optional,
+    Text,
+    Tuple,
+    Union,
+    List,
+    cast,
+    Callable,
+)
 import abc
 import sqlite3
 import email.utils
 import hashlib
 import time
 import math
-import re
 
-import lxml.html
-import lxml.etree
 import requests
 import scrapelib
 
@@ -91,8 +99,7 @@ class Scraper(scrapelib.Scraper):
 
 class Scheduler(abc.ABC):
     storage: "Storage"
-    xpath: str
-    regex_drop: str
+    hasher: Callable
 
     @abc.abstractmethod
     def query(self, key) -> bool:
@@ -118,25 +125,16 @@ class Scheduler(abc.ABC):
         else:
             last_changed = last_checked
 
-        if self.xpath:
-            page = lxml.html.fromstring(response.text)
-            relevant_sections: "List[lxml.etree._Element]"
-            relevant_sections = page.xpath(self.xpath)  # type: ignore
-            if not relevant_sections:
+        if self.hasher:
+            content_hash = self.hasher(response)
+            if not content_hash:
                 return None
-
-            (relevant_section,) = relevant_sections
-            content = lxml.etree.tostring(relevant_section).decode()
-
         else:
-            content = response.text
+            content = response.content
 
-        if self.regex_drop:
-            content = re.sub(self.regex_drop, "", content)
-
-        h = hashlib.sha256()
-        h.update(content.encode())
-        content_hash = h.hexdigest()
+            h = hashlib.sha256()
+            h.update(content.encode())
+            content_hash = h.hexdigest()
 
         self.storage.set(key, content_hash, last_checked, last_changed)
 
@@ -156,14 +154,12 @@ class PoissonScheduler(Scheduler):
         storage,
         threshold: float = 0.3,
         prior_weight: float = 3,
-        xpath=None,
-        regex_drop=None,
+        hasher=None,
     ):
 
         self.storage = storage
         self.threshold = threshold
-        self.xpath = xpath
-        self.regex_drop = regex_drop
+        self.hasher = None
 
         intervals = self.storage.intervals()
         if intervals:
