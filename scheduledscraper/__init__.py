@@ -80,7 +80,7 @@ class Scraper(scrapelib.Scraper):
 
             response = scrapelib.CacheResponse()
             response.status_code = 418
-            response.url = url
+            response.url = cast(str, url)
             response.headers = requests.structures.CaseInsensitiveDict()
             response._content = "The scheduler said we should skip".encode()
             response.raw = object()
@@ -91,6 +91,8 @@ class Scraper(scrapelib.Scraper):
 
 class Scheduler(abc.ABC):
     storage: "Storage"
+    xpath: str
+    regex_drop: str
 
     @abc.abstractmethod
     def query(self, key) -> bool:
@@ -98,9 +100,15 @@ class Scheduler(abc.ABC):
 
     def update(self, key, response: requests.Response) -> None:
 
+        last_checked: Union[float, int]
+        last_changed: Union[float, int]
         header_date = response.headers.get("date")
         if header_date:
-            last_checked = email.utils.mktime_tz(email.utils.parsedate_tz(header_date))
+            time_struct = email.utils.parsedate_tz(header_date)
+            if time_struct:
+                last_checked = email.utils.mktime_tz(time_struct)
+            else:
+                last_checked = time.time()
         else:
             last_checked = time.time()
 
@@ -112,7 +120,8 @@ class Scheduler(abc.ABC):
 
         if self.xpath:
             page = lxml.html.fromstring(response.text)
-            relevant_sections = page.xpath(self.xpath)
+            relevant_sections: "List[lxml.etree._Element]"
+            relevant_sections = page.xpath(self.xpath)  # type: ignore
             if not relevant_sections:
                 return None
 
@@ -159,7 +168,7 @@ class PoissonScheduler(Scheduler):
         intervals = self.storage.intervals()
         if intervals:
             try:
-                rate = len(intervals) / sum(intervals)
+                rate = len(intervals) / sum(intervals)  #  type: ignore
             except ZeroDivisionError:
                 rate = 1
         else:
