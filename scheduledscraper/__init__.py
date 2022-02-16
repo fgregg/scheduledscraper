@@ -168,7 +168,7 @@ class PoissonScheduler(Scheduler):
         intervals = self.storage.intervals()
         if intervals:
             try:
-                rate = len(intervals) / sum(intervals)  #  type: ignore
+                rate = len(intervals) / sum(intervals)  # type: ignore
             except ZeroDivisionError:
                 rate = 1
         else:
