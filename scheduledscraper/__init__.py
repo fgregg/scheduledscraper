@@ -1,30 +1,18 @@
-from typing import (
-    Any,
-    IO,
-    MutableMapping,
-    Optional,
-    Text,
-    Tuple,
-    Union,
-    List,
-    cast,
-)
+from typing import Any, IO, MutableMapping, Optional, Text, Tuple, Union, List, cast
 import abc
 import sqlite3
 import email.utils
 import hashlib
 import time
 import math
+import re
 
+import lxml.html
+import lxml.etree
 import requests
 import scrapelib
 
-from scrapelib._types import (
-    _Data,
-    RequestsCookieJar,
-    _HooksInput,
-    _AuthType,
-)
+from scrapelib._types import _Data, RequestsCookieJar, _HooksInput, _AuthType
 
 
 class Scraper(scrapelib.Scraper):
@@ -92,7 +80,7 @@ class Scraper(scrapelib.Scraper):
 
             response = scrapelib.CacheResponse()
             response.status_code = 418
-            response.url = cast(str, url)
+            response.url = url
             response.headers = requests.structures.CaseInsensitiveDict()
             response._content = "The scheduler said we should skip".encode()
             response.raw = object()
@@ -112,18 +100,33 @@ class Scheduler(abc.ABC):
 
         header_date = response.headers.get("date")
         if header_date:
-            last_checked = time.mktime(email.utils.parsedate(header_date))  # type: ignore
+            last_checked = email.utils.mktime_tz(email.utils.parsedate_tz(header_date))
         else:
             last_checked = time.time()
 
         header_last_modified = response.headers.get("last-modified")
         if header_last_modified:
-            last_changed = time.mktime(email.utils.parsedate(header_last_modified))  # type: ignore
+            last_changed = email.utils.mktime_tz(email.utils.parsedate_tz(header_last_modified))  # type: ignore
         else:
             last_changed = last_checked
 
+        if self.xpath:
+            page = lxml.html.fromstring(response.text)
+            relevant_sections = page.xpath(self.xpath)
+            if not relevant_sections:
+                return None
+
+            (relevant_section,) = relevant_sections
+            content = lxml.etree.tostring(relevant_section).decode()
+
+        else:
+            content = response.text
+
+        if self.regex_drop:
+            content = re.sub(self.regex_drop, "", content)
+
         h = hashlib.sha256()
-        h.update(response.content)
+        h.update(content.encode())
         content_hash = h.hexdigest()
 
         self.storage.set(key, content_hash, last_checked, last_changed)
@@ -139,12 +142,29 @@ class DummyScheduler(Scheduler):
 
 
 class PoissonScheduler(Scheduler):
-    def __init__(self, storage, threshold: float = 0.3, prior_weight: float = 3):
+    def __init__(
+        self,
+        storage,
+        threshold: float = 0.3,
+        prior_weight: float = 3,
+        xpath=None,
+        regex_drop=None,
+    ):
 
         self.storage = storage
         self.threshold = threshold
+        self.xpath = xpath
+        self.regex_drop = regex_drop
 
-        rate = len(self.storage.intervals()) / sum(self.storage.intervals())  # type: ignore
+        intervals = self.storage.intervals()
+        if intervals:
+            try:
+                rate = len(intervals) / sum(intervals)
+            except ZeroDivisionError:
+                rate = 1
+        else:
+            rate = 1
+
         self.alpha = prior_weight
         self.beta = prior_weight * (1 / rate)
 
@@ -155,6 +175,7 @@ class PoissonScheduler(Scheduler):
             return True
 
         prob_change = self._prob(*result)
+        print(prob_change)
 
         return prob_change > self.threshold
 
@@ -185,7 +206,7 @@ class Storage(abc.ABC):
 class SqliteStorage(Storage):
     def __init__(self, path):
 
-        self._conn = sqlite3.connect(path)
+        self._conn = sqlite3.connect(path, isolation_level=None)
         self._build_table()
 
     def _build_table(self) -> None:
@@ -201,8 +222,11 @@ class SqliteStorage(Storage):
     def get(self, key: str) -> Optional[Tuple[float, float]]:
 
         query = self._conn.execute(
-            "SELECT strftime('%s', 'now') - last_checked, last_checked - last_changed FROM history where key=?",
-            (key,),
+            "SELECT ? - last_checked, last_checked - last_changed FROM history where key=?",
+            (
+                time.time(),
+                key,
+            ),
         )
         return query.fetchone()
 
@@ -210,12 +234,14 @@ class SqliteStorage(Storage):
         self, key: str, content_hash: str, last_checked: float, last_changed: float
     ) -> None:
 
-        query = self._conn.execute("SELECT hash FROM history where key=?", (key,))
+        query = self._conn.execute("SELECT hash FROM history WHERE key = ?", (key,))
         row = query.fetchone()
         stored_hash = row[0] if row else None
 
         if stored_hash == content_hash:
-            self._conn.execute("UPDATE history SET last_checked = ?", (last_checked,))
+            self._conn.execute(
+                "UPDATE history SET last_checked = ? WHERE key = ?", (last_checked, key)
+            )
         else:
 
             if stored_hash:
