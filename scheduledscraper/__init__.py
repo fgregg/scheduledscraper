@@ -130,10 +130,8 @@ class Scheduler(abc.ABC):
             if not content_hash:
                 return None
         else:
-            content = response.content
-
             h = hashlib.sha256()
-            h.update(content.encode())
+            h.update(response.content)
             content_hash = h.hexdigest()
 
         self.storage.set(key, content_hash, last_checked, last_changed)
@@ -159,7 +157,7 @@ class PoissonScheduler(Scheduler):
 
         self.storage = storage
         self.threshold = threshold
-        self.hasher = None
+        self.hasher = hasher  # type: ignore
 
         intervals = self.storage.intervals()
         if intervals:
